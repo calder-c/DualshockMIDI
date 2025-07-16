@@ -19,15 +19,7 @@ std::string wcharToString(wchar_t* input) {
         return std::string( ws.begin(), ws.end() );
 }
 
-int nearDiv(double number, double divisor) {
-    if (divisor == 0.0) return 0;
 
-    // Compute the nearest multiple of `divisor`
-    double nearestMultiple = std::round(number / divisor) * divisor;
-
-    // Compare how far `number` is from this nearest multiple
-    return std::fabs(number - nearestMultiple);
-}
 void updateButton(bool current, bool previous, ButtonState & btn) {
     if (current) {
         if (!previous) {
@@ -82,7 +74,6 @@ void sendMidi(RtMidiOut* midiout, std::vector<unsigned char> message) {
 
 void processButtons(std::map<std::string, ButtonState> & btnMap, RtMidiOut* midiout, int & octave) {
     const int c = 60 + octave*12;
-
 
     if (btnMap["X"].DOWN) {
         std::vector<unsigned char> message{0x90, c, 127};
@@ -147,16 +138,6 @@ void processButtons(std::map<std::string, ButtonState> & btnMap, RtMidiOut* midi
     if (btnMap["DPAD"].DOWN) {
         octave -=1;
     }
-    // if (btnMap["RPAD"].DOWN) {
-    //     int pitchValue = 8192
-    //     unsigned char lsb = pitchValue & 0x7F;        // 0x00
-    //     unsigned char msb = (pitchValue >> 7) & 0x7F; // 0x40 (64)
-    //     std::vector<unsigned char> message{0xE0, 2000, 127};
-    // } else if (btnMap["RPAD"].UP) {
-    //     std::vector<unsigned char> message{0xE0, 2000, 127};
-    //     sendMidi(midiout, message);
-    // }
-    //
 }
 
 int main (){
@@ -190,72 +171,18 @@ int main (){
             handle = hid_open(device->vendor_id, device->product_id, device->serial_number);
             canWrite = true;
             break;
-        } else {
-            std::cout << "Other HID Device found: " << productName << " | " << device->product_id << " | " << wcharToString(device->serial_number) << std::endl;
-            device = device->next;
-
         }
+        std::cout << "Other HID Device found: " << productName << " | " << device->product_id << " | " << wcharToString(device->serial_number) << std::endl;
+        device = device->next;
     }
     if (canWrite) {
         auto *midiout = new RtMidiOut();
         midiout->openPort(1);
-        int dir = 1;
-        int dir_j = -1;
-        int dir_k = 1;
-        unsigned i = 0;
-        unsigned j = 120;
-        unsigned k = 240;
         int octave = 0;
-        auto timer{std::chrono::steady_clock::now()};
         std::chrono::steady_clock::time_point pulse;
-        int bpm = 140;
-        int ms = (60000/bpm);
-        int pulseLength = 100;
         std::bitset<8> prevBumpers;
         std::bitset<8> prevButtons;
         while (true) {
-            const auto start{std::chrono::steady_clock::now()};
-            if (RGB) {
-                if (i > 255) {
-                    dir = -1;
-                } else if (i <= 1) {
-                    dir = 1;
-                }
-                if (j > 255) {
-                    dir_j = -1;
-                } else if (j <= 1) {
-                    dir_j = 1;
-                }
-                if (k > 255) {
-                    dir_k = -1;
-                } else if (k <= 1) {
-                    dir_k = 1;
-                }
-                i += dir;
-                j += dir_j;
-                k += dir_k;
-                bufOut[6]= i;
-                bufOut[7] = j;
-                bufOut[8] = k;
-            }
-            if (BLINK){
-                    if (nearDiv(
-                        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - timer).
-                        count(), ms) <= 5) {
-                        bufOut[6] = 255;
-                        bufOut[4] = 255;
-                        pulse = std::chrono::steady_clock::now();
-                        std::cout << "Triggered" << std::endl;
-                    } else if (!(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - pulse)
-                                 .count() <= pulseLength)) {
-                        bufOut[6] = 0;
-                        bufOut[4] = 0;
-                        //std::cout << std::to_string(((std::chrono::steady_clock::now() - timer).count() / secs));
-                                 }
-                    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - timer).count() << "[ms]" << std::endl;
-                    std::cout << nearDiv(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - timer).count(), ms) << std::endl;
-            }
-
             int hid_read_success = hid_read(handle, bufIn, 32);
             if (hid_read_success != -1) {
             } else {
@@ -267,20 +194,20 @@ int main (){
             std::bitset<4> lower(dpadLookup[(int)(buttons.to_ulong() & 0x0F)]);
             std::bitset<4> upper((buttons.to_ulong() >> 4) & 0x0F);
             buttons = ( (upper.to_ulong() << 4) | lower.to_ulong() );
-
             auto events = parseBumpers(bumpers, prevBumpers, buttons, prevButtons);
-            prevBumpers = bumpers;
-            prevButtons = buttons;
-            processButtons(events, midiout, octave);
 
-            const auto finish{std::chrono::steady_clock::now()};
+            prevBumpers = bumpers;
+
+            prevButtons = buttons;
+
+            processButtons(events, midiout, octave);
 
         }
 
-    } else {
-        std::cout << "Failed to find device" << std::endl;
     }
-
     hid_free_enumeration(devices);
     hid_exit();
+    throw(std::runtime_error("Failed to find device"));
+
+
 }
