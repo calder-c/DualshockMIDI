@@ -19,6 +19,20 @@ std::string wcharToString(wchar_t* input) {
         return std::string( ws.begin(), ws.end() );
 }
 
+std::pair<unsigned char, unsigned char> numberToPitchBend(int num){
+    if (num > 16383) {
+        throw(std::runtime_error("Invalid MIDI pitch bend."));
+    }
+    unsigned char lsByte = num & 0x7F, msByte = (num >> 7) & 0x7F;
+    return std::pair(lsByte, msByte);
+}
+void applyDeadzone(std::map<std::string, unsigned char>& stickState, int dz = 20, int neutral = 128) {
+    for (auto & pair : stickState) {
+        if (pair.second > neutral-dz && pair.second < neutral+dz) {
+            pair.second = neutral;
+        }
+    }
+}
 
 void updateButton(bool current, bool previous, ButtonState & btn) {
     if (current) {
@@ -53,15 +67,6 @@ std::map <std::string, ButtonState> parseBumpers(std::bitset<8> bumpers, std::bi
 
     return btnMap;
 }
-void buttonDEBUG(std::map<std::string, ButtonState> events) {
-    for (auto pair : events) {
-        std::cout << pair.first << ": " << std::endl;
-        std::cout << "UP" << " " << pair.second.UP << std::endl;
-        std::cout << "DOWN" << " " << pair.second.DOWN << std::endl;
-        std::cout << "NEUTRAL" << " " << pair.second.NEUTRAL << std::endl;
-        std::cout << "HOLD" << " " << pair.second.HOLD << std::endl;
-    }
-}
 
 void sendMidi(RtMidiOut* midiout, std::vector<unsigned char> message) {
     try {
@@ -72,9 +77,11 @@ void sendMidi(RtMidiOut* midiout, std::vector<unsigned char> message) {
     }
 }
 
-void processButtons(std::map<std::string, ButtonState> & btnMap, RtMidiOut* midiout, int & octave) {
+void processButtons(std::map<std::string, ButtonState> & btnMap, RtMidiOut* midiout, std::map<std::string, unsigned char> stickState, int & octave) {
     const int c = 60 + octave*12;
-
+    const int pitchMiddle = 8192;
+    double pitchBend = stickState["lStickY"];
+    pitchBend = (-(pitchBend - 128) / 128);
     if (btnMap["X"].DOWN) {
         std::vector<unsigned char> message{0x90, c, 127};
         sendMidi(midiout, message);
@@ -138,6 +145,16 @@ void processButtons(std::map<std::string, ButtonState> & btnMap, RtMidiOut* midi
     if (btnMap["DPAD"].DOWN) {
         octave -=1;
     }
+    if (pitchBend != 0) {
+        pitchBend *= 2000;
+        std::pair<unsigned char, unsigned char> pitchBytes = numberToPitchBend(pitchMiddle + pitchBend);
+        std::vector<unsigned char> message{0xE0, pitchBytes.first, pitchBytes.second};
+        sendMidi(midiout, message);
+    } else {
+        std::pair<unsigned char, unsigned char> pitchBytes = numberToPitchBend(8192);
+        std::vector<unsigned char> message{0xE0, pitchBytes.first, pitchBytes.second};
+        sendMidi(midiout, message);
+    }
 }
 
 int main (){
@@ -188,7 +205,8 @@ int main (){
             } else {
                 throw(std::runtime_error("Failed to read from device"));
             }
-
+            std::map<std::string, unsigned char> stickState{{"lStickX" , bufIn[1]}, {"lStickY" , bufIn[2]}, {"rStickX" , bufIn[3]}, {"rStickY" , bufIn[4]}};
+            applyDeadzone(stickState);
             std::bitset<8> bumpers = bufIn[6];
             std::bitset<8> buttons = bufIn[5];
             std::bitset<4> lower(dpadLookup[(int)(buttons.to_ulong() & 0x0F)]);
@@ -200,7 +218,7 @@ int main (){
 
             prevButtons = buttons;
 
-            processButtons(events, midiout, octave);
+            processButtons(events, midiout, stickState, octave);
 
         }
 
